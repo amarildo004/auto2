@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import queue
 from datetime import datetime
-from typing import Callable, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from tkinter.scrolledtext import ScrolledText
@@ -93,13 +93,13 @@ class LayerEditor(ttk.Frame):
         self.canvas_width = int(DEFAULT_CANVAS_WIDTH * self.display_scale)
         self.canvas_height = int(DEFAULT_CANVAS_HEIGHT * self.display_scale)
         self.selected_layer: str = "video_main"
-        self.dragging_layer: str | None = None
-        self._drag_start: tuple[float, float] | None = None
-        self._layer_start: tuple[float, float] | None = None
-        self.layer_items: dict[str, dict[str, int]] = {}
-        self.layer_rows: dict[str, ttk.Frame] = {}
-        self.visible_vars: dict[str, tk.BooleanVar] = {}
-        self.lock_vars: dict[str, tk.BooleanVar] = {}
+        self.dragging_layer: Optional[str] = None
+        self._drag_start: Optional[Tuple[float, float]] = None
+        self._layer_start: Optional[Tuple[float, float]] = None
+        self.layer_items: Dict[str, Dict[str, int]] = {}
+        self.layer_rows: Dict[str, ttk.Frame] = {}
+        self.visible_vars: Dict[str, tk.BooleanVar] = {}
+        self.lock_vars: Dict[str, tk.BooleanVar] = {}
         self.zoom_var = tk.DoubleVar(
             value=float(self.layout_state["layers"]["video_main"].get("scale", 1.12))
         )
@@ -315,7 +315,7 @@ class LayerEditor(ttk.Frame):
     def _from_display(self, value: float) -> float:
         return value / self.display_scale
 
-    def _anchor_offset(self, anchor: str, width: float, height: float) -> tuple[float, float]:
+    def _anchor_offset(self, anchor: str, width: float, height: float) -> Tuple[float, float]:
         anchor = anchor.lower()
         if anchor == "topleft":
             return 0, 0
@@ -335,7 +335,7 @@ class LayerEditor(ttk.Frame):
             return -width, -height / 2
         return -width / 2, -height / 2
 
-    def _layer_size(self, layer: str) -> tuple[float, float]:
+    def _layer_size(self, layer: str) -> Tuple[float, float]:
         info = self.layout_state["layers"].get(layer, {})
         if layer == "video_main":
             scale = float(info.get("scale", 1.12))
@@ -356,7 +356,7 @@ class LayerEditor(ttk.Frame):
         info["h"] = height
         return width, height
 
-    def _layer_bbox(self, layer: str) -> tuple[float, float, float, float]:
+    def _layer_bbox(self, layer: str) -> Tuple[float, float, float, float]:
         info = self.layout_state["layers"].get(layer, {})
         width, height = self._layer_size(layer)
         anchor = str(info.get("anchor", "center"))
@@ -536,7 +536,7 @@ class LayerEditor(ttk.Frame):
         self.canvas.itemconfigure(self.guide_vertical, state="hidden")
         self.canvas.itemconfigure(self.guide_horizontal, state="hidden")
 
-    def _snap_value(self, value: float, targets: list[float]) -> tuple[float, bool]:
+    def _snap_value(self, value: float, targets: List[float]) -> Tuple[float, bool]:
         for target in targets:
             if abs(value - target) <= self.snap_threshold:
                 return target, True
@@ -609,7 +609,7 @@ class WorkspaceFrame(ttk.Frame):
         self.directories = directories
         self.workspace_id = workspace_id
         self.registry = registry
-        self._ui_queue: "queue.Queue[tuple[VideoJob, JobStage, str]]" = queue.Queue()
+        self._ui_queue: "queue.Queue[Tuple[VideoJob, JobStage, str]]" = queue.Queue()
         self.controller = registry.get_or_create(
             workspace_id, self.settings, self._on_progress
         )
@@ -1293,8 +1293,8 @@ class ClipperStudioApp(tk.Tk):
         self.minsize(1000, 700)
         self._configure_styles()
         self.registry = WorkspaceRegistry()
-        self.workspace_tabs: dict[str, int] = {}
-        self.workspace_frames: dict[int, WorkspaceFrame] = {}
+        self.workspace_tabs: Dict[str, int] = {}
+        self.workspace_frames: Dict[int, WorkspaceFrame] = {}
         self.current_workspace_id: Optional[int] = None
         self._context_tab: Optional[str] = None
         self._build_ui()

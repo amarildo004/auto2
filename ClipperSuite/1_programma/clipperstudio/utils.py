@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 import random
 from datetime import timedelta
-from typing import Iterable, List, Sequence
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 
 def format_timedelta(seconds: float) -> str:
@@ -32,7 +32,7 @@ def generate_clip_plan(
     overlap: int,
     final_min: int,
     final_max: int,
-) -> List[tuple[float, float]]:
+) -> List[Tuple[float, float]]:
     """Split ``duration`` seconds into clips of approximately ``clip_duration``.
 
     The final clip is adjusted so that its duration falls within
@@ -44,7 +44,7 @@ def generate_clip_plan(
 
     clip_duration = max(1, clip_duration)
     overlap = max(0, overlap)
-    clips: List[tuple[float, float]] = []
+    clips: List[Tuple[float, float]] = []
     start = 0.0
     while start < duration:
         end = start + clip_duration
@@ -69,7 +69,7 @@ def generate_clip_plan(
 
 
 def randomise_interval(
-    base_seconds: int, variation_seconds: int, *, rng: random.Random | None = None
+    base_seconds: int, variation_seconds: int, *, rng: Optional[random.Random] = None
 ) -> int:
     """Return a randomised interval based on ``base_seconds``.
 

@@ -10,7 +10,7 @@ import shutil
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Set
 import re
 
 # ---------------------------------------------------------------- filesystem
@@ -333,9 +333,9 @@ def duplicate_workspace_layout(
     return layout
 
 
-def list_workspace_ids() -> list[int]:
+def list_workspace_ids() -> List[int]:
     ensure_project_structure()
-    ids: set[int] = set()
+    ids: Set[int] = set()
     pattern = re.compile(r"workspace_(\d+)")
     for path in DEFAULT_WORKSPACE_ROOT.iterdir():
         if not path.is_dir():
@@ -350,7 +350,7 @@ def list_workspace_ids() -> list[int]:
     return sorted(ids)
 
 
-def next_workspace_id(existing: Optional[set[int]] = None) -> int:
+def next_workspace_id(existing: Optional[Set[int]] = None) -> int:
     ensure_project_structure()
     if existing is None:
         existing = set(list_workspace_ids())

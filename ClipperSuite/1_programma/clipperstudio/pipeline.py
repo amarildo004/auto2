@@ -14,7 +14,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from .config import (
     CLIPPERSUITE_ROOT,
@@ -122,7 +122,7 @@ class ClipperPipeline:
         return duration
 
     # ------------------------------------------------------------- clip render
-    def _anchor_offset(self, anchor: str, width: int, height: int) -> tuple[int, int]:
+    def _anchor_offset(self, anchor: str, width: int, height: int) -> Tuple[int, int]:
         anchor = anchor.lower()
         if anchor == "topleft":
             return (0, 0)
