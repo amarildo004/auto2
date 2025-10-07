@@ -1,0 +1,21 @@
+{
+  "rendering": {
+    "clip_duration_seconds": 120,
+    "clip_overlap_seconds": 0,
+    "final_clip_min_seconds": 120,
+    "final_clip_max_seconds": 240,
+    "title": "",
+    "show_part_label": true,
+    "font_path": null,
+    "crf": 18,
+    "x264_preset": "medium"
+  },
+  "publication": {
+    "publish_interval_minutes": 20,
+    "randomize_interval": false,
+    "randomization_range_seconds": 120,
+    "part_label_prefix": "Parte",
+    "part_label_enabled": true,
+    "part_label_spacing": 0
+  }
+}
