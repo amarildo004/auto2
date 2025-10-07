@@ -48,15 +48,21 @@ class WorkspaceController:
         identifier = uuid.uuid4().hex[:8]
         self.settings.ensure_directories()
         download_dir = self.settings.download_directory / f"job_{identifier}"
+        processing_dir = self.settings.processing_directory / f"job_{identifier}"
         clips_dir = self.settings.clips_directory / f"job_{identifier}"
-        download_dir.mkdir(parents=True, exist_ok=True)
-        clips_dir.mkdir(parents=True, exist_ok=True)
+        published_dir = self.settings.published_directory / f"job_{identifier}"
+        logs_dir = self.settings.logs_directory / f"job_{identifier}"
+        for path in (download_dir, processing_dir, clips_dir, published_dir, logs_dir):
+            path.mkdir(parents=True, exist_ok=True)
         job = VideoJob(
             url=url,
             workspace_id=self.workspace_id,
             identifier=identifier,
             download_path=download_dir,
+            processing_directory=processing_dir,
             clips_directory=clips_dir,
+            published_directory=published_dir,
+            logs_directory=logs_dir,
         )
         self._queue.put(QueueItem(job))
         self._emit(job, JobStage.QUEUED, "In coda")

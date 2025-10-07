@@ -8,12 +8,16 @@ from tkinter.scrolledtext import ScrolledText
 
 from clipperstudio.config import (
     DEFAULT_RANDOMIZATION_RANGE_SECONDS,
-    DEFAULT_WORKSPACE_ROOT,
     PublishInterval,
     WorkspaceSettings,
+    create_workspace_directories,
+    ensure_project_structure,
 )
 from clipperstudio.models import JobStage, VideoJob
 from clipperstudio.workspace import WorkspaceRegistry
+
+
+ensure_project_structure()
 
 
 class WorkspaceFrame(ttk.Frame):
@@ -23,12 +27,16 @@ class WorkspaceFrame(ttk.Frame):
         self, master: tk.Misc, workspace_id: int, registry: WorkspaceRegistry
     ) -> None:
         super().__init__(master)
-        root = DEFAULT_WORKSPACE_ROOT / f"workspace_{workspace_id}"
+        directories = create_workspace_directories(workspace_id)
         settings = WorkspaceSettings(
-            download_directory=root / "downloads",
-            clips_directory=root / "clips",
+            download_directory=directories.downloads,
+            processing_directory=directories.processing,
+            clips_directory=directories.clips,
+            published_directory=directories.published,
+            logs_directory=directories.logs,
         )
         self.settings = settings
+        self.directories = directories
         self.workspace_id = workspace_id
         self.registry = registry
         self._ui_queue: "queue.Queue[tuple[VideoJob, JobStage, str]]" = queue.Queue()
@@ -560,6 +568,12 @@ class WorkspaceFrame(ttk.Frame):
         )
         self.log_text.configure(state="disabled")
         self.log_text.yview_moveto(1.0)
+        log_file = job.logs_directory / "events.log"
+        try:
+            with open(log_file, "a", encoding="utf-8") as handle:
+                handle.write(f"{stage.label()} | {message}\n")
+        except OSError:
+            pass
 
 
 class ClipperStudioApp(tk.Tk):

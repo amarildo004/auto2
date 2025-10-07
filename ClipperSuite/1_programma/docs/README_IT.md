@@ -43,7 +43,7 @@ informativo se uno di essi manca.
 ## Avvio
 
 ```bash
-python ClipperStudio_GUI.py
+python ClipperSuite/1_programma/ClipperStudio_GUI.py
 ```
 
 La finestra principale si aprirà immediatamente senza necessità di interazione
@@ -53,12 +53,16 @@ fra le clip e premi "Aggiungi alla coda" per avviare il processo.
 ## Struttura del progetto
 
 ```
-ClipperStudio_GUI.py          # Interfaccia grafica principale
-clipperstudio/config.py       # Dataclass e costanti di configurazione
-clipperstudio/models.py       # Modelli e tipi condivisi
-clipperstudio/pipeline.py     # Pipeline di download, rendering e upload
-clipperstudio/utils.py        # Funzioni di supporto
-clipperstudio/workspace.py    # Gestione delle code per workspace/scheda
+ClipperSuite/
+├── 1_programma/
+│   ├── ClipperStudio_GUI.py          # Interfaccia grafica principale
+│   ├── clipperstudio/                # Moduli condivisi (config, pipeline, ecc.)
+│   ├── config/
+│   │   └── settings.json             # Creato automaticamente con i valori base
+│   └── docs/
+│       └── README_IT.md              # Questo documento
+├── 2_spaziatura/                     # Workspace generati al volo (downloads, clips...)
+└── 3_programmi_necessari/            # Binari opzionali (ffmpeg, yt-dlp, ambiente Python)
 ```
 
 ## Note sullo spazio disco

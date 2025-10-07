@@ -48,7 +48,10 @@ class VideoJob:
     workspace_id: int
     identifier: str
     download_path: Path
+    processing_directory: Path
     clips_directory: Path
+    published_directory: Path
+    logs_directory: Path
     estimated_duration: Optional[float] = None
     clip_plan: List[ClipTiming] = field(default_factory=list)
     status: JobStage = JobStage.QUEUED

@@ -10,14 +10,19 @@ some optional dependencies are missing.
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional
 
-from .config import WorkspaceSettings
+from .config import (
+    CLIPPERSUITE_ROOT,
+    DEPENDENCIES_ROOT,
+    DEPENDENCY_HINTS,
+    WorkspaceSettings,
+    locate_dependency,
+)
 from .models import ClipTiming, JobStage, ProgressCallback, VideoJob
 from .utils import generate_clip_plan, randomise_interval
 
@@ -44,13 +49,26 @@ class ClipperPipeline:
     def __init__(self, settings: WorkspaceSettings, callback: ProgressCallback) -> None:
         self.settings = settings
         self.logger = PipelineLogger(callback)
+        self._executables: Dict[str, str] = {}
 
     # ------------------------------------------------------------------ utils
-    def _check_dependency(self, name: str) -> None:
-        if shutil.which(name) is None:
-            raise DependencyError(
-                f"Il comando '{name}' non è disponibile. Installalo prima di procedere."
-            )
+    def _resolve_executable(self, name: str) -> str:
+        if name not in self._executables:
+            executable = locate_dependency(name)
+            if executable is None:
+                hint_dir = DEPENDENCY_HINTS.get(name, DEPENDENCIES_ROOT)
+                try:
+                    display_hint = hint_dir.relative_to(CLIPPERSUITE_ROOT)
+                except ValueError:
+                    display_hint = hint_dir
+                raise DependencyError(
+                    (
+                        f"Il comando '{name}' non è disponibile. "
+                        f"Installa il programma oppure copialo in '{display_hint}'."
+                    )
+                )
+            self._executables[name] = str(executable)
+        return self._executables[name]
 
     def _run(self, args: List[str], cwd: Optional[Path] = None) -> None:
         subprocess.run(args, cwd=cwd, check=True)
@@ -58,10 +76,10 @@ class ClipperPipeline:
     # ---------------------------------------------------------------- download
     def download(self, job: VideoJob) -> Path:
         self.logger.emit(job, JobStage.DOWNLOADING, "Download del video in corso…")
-        self._check_dependency("yt-dlp")
+        yt_dlp = self._resolve_executable("yt-dlp")
         output_template = job.download_path / "%(title)s.%(ext)s"
         args = [
-            "yt-dlp",
+            yt_dlp,
             job.url,
             "-o",
             str(output_template),
@@ -76,9 +94,9 @@ class ClipperPipeline:
 
     # --------------------------------------------------------------- inspection
     def probe_duration(self, video_file: Path) -> float:
-        self._check_dependency("ffprobe")
+        ffprobe = self._resolve_executable("ffprobe")
         args = [
-            "ffprobe",
+            ffprobe,
             "-v",
             "error",
             "-select_streams",
@@ -98,7 +116,7 @@ class ClipperPipeline:
     def render_clips(
         self, video_file: Path, job: VideoJob, clip_plan: Iterable[ClipTiming]
     ) -> List[Path]:
-        self._check_dependency("ffmpeg")
+        ffmpeg = self._resolve_executable("ffmpeg")
         output_files: List[Path] = []
         render_settings = self.settings.rendering
         job.clips_directory.mkdir(parents=True, exist_ok=True)
@@ -140,7 +158,7 @@ class ClipperPipeline:
                 vf_parts.append(drawtext)
             vf = ",".join(vf_parts)
             args = [
-                "ffmpeg",
+                ffmpeg,
                 "-y",
                 "-ss",
                 str(clip.start),
@@ -211,6 +229,17 @@ class ClipperPipeline:
             simulated_wait = min(publish_after, 5)
             if simulated_wait:
                 time.sleep(simulated_wait)
+            log_path = job.published_directory / f"clip_{index + 1:03d}.txt"
+            try:
+                log_path.write_text(
+                    (
+                        f"clip: {clip_file.name}\n"
+                        f"ritardo_secondi: {publish_after}\n"
+                    ),
+                    encoding="utf-8",
+                )
+            except OSError:
+                pass
         # Simulate successful publication by removing files after loop in cleanup.
 
     # --------------------------------------------------------------- clean up
@@ -222,6 +251,14 @@ class ClipperPipeline:
             try:
                 job.download_path.rmdir()
             except OSError:  # pragma: no cover - best effort cleanup
+                pass
+        if job.processing_directory.exists():
+            for file in job.processing_directory.iterdir():
+                if file.is_file():
+                    file.unlink()
+            try:
+                job.processing_directory.rmdir()
+            except OSError:
                 pass
         if job.clips_directory.exists() and job.status is JobStage.COMPLETED:
             for file in job.clips_directory.iterdir():
