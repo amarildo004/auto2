@@ -36,6 +36,9 @@ ensure_project_structure()
 class LayerEditor(ttk.Frame):
     """Interactive 9:16 canvas used to arrange visual layers."""
 
+    _HEX_DIGITS = set("0123456789abcdef")
+    CANVAS_BACKGROUND = "#020617"
+
     LAYER_ORDER = [
         "video_main",
         "title",
@@ -118,6 +121,58 @@ class LayerEditor(ttk.Frame):
         self._build()
 
     # ----------------------------------------------------------------- helpers
+    @classmethod
+    def _ensure_hex(cls, color: str, fallback: str = "#000000") -> str:
+        """Return a Tk-compatible #RRGGBB color, stripping alpha components."""
+
+        def sanitize(value: str) -> str:
+            if not value:
+                return "#000000"
+            cleaned = value.strip()
+            if not cleaned:
+                return "#000000"
+            if not cleaned.startswith("#"):
+                return cleaned  # named colors remain untouched
+            digits = "".join(
+                ch
+                for ch in cleaned[1:].lower()
+                if ch in cls._HEX_DIGITS
+            )
+            if len(digits) < 6:
+                digits = (digits + "000000")[:6]
+            return f"#{digits[:6]}"
+
+        base = sanitize(fallback)
+        sanitized = sanitize(color)
+        if sanitized.startswith("#") and len(sanitized) == 7:
+            return sanitized
+        if not sanitized.startswith("#"):
+            return sanitized
+        return base
+
+    @classmethod
+    def _mix_color(cls, color: str, background: str, alpha: float) -> str:
+        """Approximate an alpha blend for Tkinter by mixing two colors."""
+
+        alpha = max(0.0, min(1.0, alpha))
+        fg = cls._ensure_hex(color)
+        bg = cls._ensure_hex(background)
+        if not fg.startswith("#") or not bg.startswith("#"):
+            return fg
+
+        def to_rgb(value: str) -> Tuple[int, int, int]:
+            value = value.lstrip("#")
+            return tuple(int(value[i : i + 2], 16) for i in (0, 2, 4))
+
+        fg_r, fg_g, fg_b = to_rgb(fg)
+        bg_r, bg_g, bg_b = to_rgb(bg)
+        mix = (
+            int(round(fg_r * alpha + bg_r * (1 - alpha))),
+            int(round(fg_g * alpha + bg_g * (1 - alpha))),
+            int(round(fg_b * alpha + bg_b * (1 - alpha))),
+        )
+        return "#{:02x}{:02x}{:02x}".format(*mix)
+
     def _build(self) -> None:
         self._building = True
         for column in range(3):
@@ -137,7 +192,7 @@ class LayerEditor(ttk.Frame):
             canvas_container,
             width=self.canvas_width,
             height=self.canvas_height,
-            bg="#020617",
+            bg=self.CANVAS_BACKGROUND,
             highlightthickness=0,
         )
         self.canvas.pack()
@@ -146,11 +201,11 @@ class LayerEditor(ttk.Frame):
             0,
             self.canvas_width,
             self.canvas_height,
-            fill="#020617",
+            fill=self.CANVAS_BACKGROUND,
             outline="#1f2937",
         )
 
-        safe_color = "#facc1566"
+        safe_color = self._mix_color("#facc15", self.CANVAS_BACKGROUND, 0.35)
         zone_height = int(180 * self.display_scale)
         self.safe_zone_top = self.canvas.create_rectangle(
             0,
@@ -380,12 +435,13 @@ class LayerEditor(ttk.Frame):
         for layer in self.LAYER_ORDER:
             bbox = self._layer_bbox(layer)
             meta = self.LAYER_META.get(layer, {})
-            color = meta.get("color", "#64748b")
+            color = self._ensure_hex(meta.get("color", "#64748b"), "#64748b")
+            fill_color = self._mix_color(color, self.CANVAS_BACKGROUND, 0.35)
             rect = self.canvas.create_rectangle(
                 *bbox,
                 outline=color,
                 width=2,
-                fill=f"{color}33",
+                fill=fill_color,
             )
             label = meta.get("label", layer)
             text = self.canvas.create_text(
