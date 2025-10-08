@@ -27,6 +27,9 @@ from clipperstudio.models import JobStage, VideoJob
 from clipperstudio.workspace import WorkspaceRegistry
 
 
+HAS_TTK_SPINBOX = hasattr(ttk, "Spinbox")
+
+
 ensure_project_structure()
 
 
@@ -619,6 +622,47 @@ class WorkspaceFrame(ttk.Frame):
         self.after(100, self._process_ui_queue)
 
     # ----------------------------------------------------------------- UI setup
+    def _spinbox(
+        self,
+        parent: tk.Misc,
+        variable: tk.Variable,
+        minimum: int,
+        maximum: int,
+        step: int,
+        width: int,
+    ) -> tk.Widget:
+        """Return a Spinbox widget compatible with the current Tk build."""
+
+        if HAS_TTK_SPINBOX:
+            return ttk.Spinbox(
+                parent,
+                from_=minimum,
+                to=maximum,
+                increment=step,
+                textvariable=variable,
+                width=width,
+                style="Dark.TSpinbox",
+            )
+
+        spinbox = tk.Spinbox(
+            parent,
+            from_=minimum,
+            to=maximum,
+            increment=step,
+            textvariable=variable,
+            width=width,
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground="#1f2937",
+            highlightcolor="#2563eb",
+            borderwidth=0,
+            bg="#0f172a",
+            fg="#f8fafc",
+            insertbackground="#f8fafc",
+            justify="center",
+        )
+        return spinbox
+
     def _build_ui(self) -> None:
         container = ttk.Frame(self, style="Workspace.TFrame", padding=24)
         container.pack(fill="both", expand=True)
@@ -694,14 +738,8 @@ class WorkspaceFrame(ttk.Frame):
         self.clip_duration_var = tk.IntVar(
             value=self.settings.rendering.clip_duration
         )
-        clip_duration_spin = ttk.Spinbox(
-            left_panel,
-            from_=30,
-            to=600,
-            increment=10,
-            textvariable=self.clip_duration_var,
-            width=8,
-            style="Dark.TSpinbox",
+        clip_duration_spin = self._spinbox(
+            left_panel, self.clip_duration_var, 30, 600, 10, 8
         )
         clip_duration_spin.grid(row=4, column=1, sticky="w", padx=(12, 0), pady=4)
         self.clip_duration_var.trace_add("write", self._on_clip_duration_change)
@@ -710,15 +748,7 @@ class WorkspaceFrame(ttk.Frame):
             row=5, column=0, sticky="w"
         )
         self.overlap_var = tk.IntVar(value=self.settings.rendering.clip_overlap)
-        overlap_spin = ttk.Spinbox(
-            left_panel,
-            from_=0,
-            to=30,
-            increment=1,
-            textvariable=self.overlap_var,
-            width=6,
-            style="Dark.TSpinbox",
-        )
+        overlap_spin = self._spinbox(left_panel, self.overlap_var, 0, 30, 1, 6)
         overlap_spin.grid(row=5, column=1, sticky="w", padx=(12, 0), pady=4)
         self.overlap_var.trace_add("write", self._on_overlap_change)
 
@@ -726,14 +756,8 @@ class WorkspaceFrame(ttk.Frame):
             row=6, column=0, sticky="w"
         )
         self.final_min_var = tk.IntVar(value=self.settings.rendering.final_clip_min)
-        final_min_spin = ttk.Spinbox(
-            left_panel,
-            from_=60,
-            to=360,
-            increment=10,
-            textvariable=self.final_min_var,
-            width=8,
-            style="Dark.TSpinbox",
+        final_min_spin = self._spinbox(
+            left_panel, self.final_min_var, 60, 360, 10, 8
         )
         final_min_spin.grid(row=6, column=1, sticky="w", padx=(12, 0), pady=4)
         self.final_min_var.trace_add("write", self._on_final_min_change)
@@ -742,14 +766,8 @@ class WorkspaceFrame(ttk.Frame):
             row=7, column=0, sticky="w"
         )
         self.final_max_var = tk.IntVar(value=self.settings.rendering.final_clip_max)
-        final_max_spin = ttk.Spinbox(
-            left_panel,
-            from_=90,
-            to=480,
-            increment=10,
-            textvariable=self.final_max_var,
-            width=8,
-            style="Dark.TSpinbox",
+        final_max_spin = self._spinbox(
+            left_panel, self.final_max_var, 90, 480, 10, 8
         )
         final_max_spin.grid(row=7, column=1, sticky="w", padx=(12, 0), pady=4)
         self.final_max_var.trace_add("write", self._on_final_max_change)
@@ -762,15 +780,7 @@ class WorkspaceFrame(ttk.Frame):
             row=9, column=0, sticky="w"
         )
         self.crf_var = tk.IntVar(value=self.settings.rendering.crf)
-        crf_spin = ttk.Spinbox(
-            left_panel,
-            from_=10,
-            to=35,
-            increment=1,
-            textvariable=self.crf_var,
-            width=6,
-            style="Dark.TSpinbox",
-        )
+        crf_spin = self._spinbox(left_panel, self.crf_var, 10, 35, 1, 6)
         crf_spin.grid(row=9, column=1, sticky="w", padx=(12, 0), pady=4)
         self.crf_var.trace_add("write", self._on_crf_change)
 
@@ -831,15 +841,7 @@ class WorkspaceFrame(ttk.Frame):
         self.interval_var = tk.DoubleVar(
             value=self.settings.publication.publish_interval.as_minutes()
         )
-        interval_spin = ttk.Spinbox(
-            left_panel,
-            from_=0,
-            to=180,
-            increment=1,
-            textvariable=self.interval_var,
-            width=8,
-            style="Dark.TSpinbox",
-        )
+        interval_spin = self._spinbox(left_panel, self.interval_var, 0, 180, 1, 8)
         interval_spin.grid(row=14, column=1, sticky="w", padx=(12, 0), pady=4)
         self.interval_var.trace_add("write", self._on_interval_change)
 
@@ -860,14 +862,8 @@ class WorkspaceFrame(ttk.Frame):
         self.random_range_var = tk.IntVar(
             value=self.settings.publication.randomization_range_seconds
         )
-        random_range_spin = ttk.Spinbox(
-            left_panel,
-            from_=0,
-            to=600,
-            increment=10,
-            textvariable=self.random_range_var,
-            width=8,
-            style="Dark.TSpinbox",
+        random_range_spin = self._spinbox(
+            left_panel, self.random_range_var, 0, 600, 10, 8
         )
         random_range_spin.grid(row=16, column=1, sticky="w", padx=(12, 0), pady=4)
         self.random_range_var.trace_add("write", self._on_random_range_change)
@@ -1352,7 +1348,8 @@ class ClipperStudioApp(tk.Tk):
             foreground=[("disabled", "#475569")],
         )
         style.configure("Dark.TEntry", fieldbackground="#0f172a", foreground="#f8fafc")
-        style.configure("Dark.TSpinbox", fieldbackground="#0f172a", foreground="#f8fafc")
+        if HAS_TTK_SPINBOX:
+            style.configure("Dark.TSpinbox", fieldbackground="#0f172a", foreground="#f8fafc")
         style.configure("Dark.TCombobox", fieldbackground="#0f172a", background="#0f172a", foreground="#f8fafc")
         style.map("Dark.TCombobox", fieldbackground=[("readonly", "#0f172a")])
         style.configure("Vertical.TScrollbar", background="#1e293b", troughcolor="#0f172a")
