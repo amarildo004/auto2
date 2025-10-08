@@ -202,8 +202,20 @@ class ClipperPipeline:
         offset_x, offset_y = self._anchor_offset(anchor, target_width, target_height)
         overlay_x = int(round(vx + offset_x))
         overlay_y = int(round(vy + offset_y))
-        overlay_x = max(min(overlay_x, canvas_width - target_width), 0)
-        overlay_y = max(min(overlay_y, canvas_height - target_height), 0)
+
+        def clamp_overlay(value: int, canvas_extent: int, target_extent: int) -> int:
+            """Clamp overlay coordinate while preserving centring for zoomed layers."""
+
+            lower = min(0, canvas_extent - target_extent)
+            upper = max(0, canvas_extent - target_extent)
+            if value < lower:
+                return lower
+            if value > upper:
+                return upper
+            return value
+
+        overlay_x = clamp_overlay(overlay_x, canvas_width, target_width)
+        overlay_y = clamp_overlay(overlay_y, canvas_height, target_height)
 
         for clip in clip_plan:
             output_file = job.clips_directory / f"clip_{clip.index:03d}.mp4"
