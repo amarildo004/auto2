@@ -674,6 +674,16 @@ class WorkspaceFrame(ttk.Frame):
         )
         self.layout_state = load_workspace_layout(workspace_id)
         self.layout_dirty = False
+        self.sections: Dict[str, Dict[str, object]] = {}
+        self.queue_order: List[str] = []
+        self.state_colors: Dict[JobStage, str] = {
+            JobStage.QUEUED: "#facc15",
+            JobStage.DOWNLOADING: "#38bdf8",
+            JobStage.PROCESSING: "#f97316",
+            JobStage.PUBLISHING: "#a855f7",
+            JobStage.COMPLETED: "#22c55e",
+            JobStage.FAILED: "#ef4444",
+        }
         self._build_ui()
         self.after(100, self._process_ui_queue)
 
@@ -719,16 +729,15 @@ class WorkspaceFrame(ttk.Frame):
         )
         return spinbox
 
+
     def _build_ui(self) -> None:
-        container = ttk.Frame(self, style="Workspace.TFrame", padding=24)
+        container = ttk.Frame(self, style="Workspace.TFrame", padding=16)
         container.pack(fill="both", expand=True)
-        container.columnconfigure(0, weight=0)
-        container.columnconfigure(1, weight=1)
-        container.columnconfigure(2, weight=0)
+        container.columnconfigure(0, weight=1)
         container.rowconfigure(1, weight=1)
 
         header = ttk.Frame(container, style="Header.TFrame")
-        header.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 24))
+        header.grid(row=0, column=0, sticky="ew", pady=(0, 16))
         header.columnconfigure(0, weight=1)
 
         brand = ttk.Label(
@@ -746,33 +755,64 @@ class WorkspaceFrame(ttk.Frame):
         )
         refresh_button.grid(row=0, column=1, padx=(12, 0), sticky="e")
 
-        left_panel = ttk.Frame(container, style="Card.TFrame", padding=20)
-        left_panel.grid(row=1, column=0, sticky="nsew")
-        for index in range(4):
-            left_panel.rowconfigure(index, weight=0)
-        left_panel.columnconfigure(1, weight=1)
+        self.paned = ttk.Panedwindow(container, orient="horizontal")
+        self.paned.grid(row=1, column=0, sticky="nsew")
 
-        ttk.Label(
-            left_panel, text="Parametri", style="Section.TLabel"
-        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 12))
+        left_container = ttk.Frame(self.paned, style="Workspace.TFrame", padding=(0, 0, 16, 0))
+        center_container = ttk.Frame(self.paned, style="Workspace.TFrame")
+        right_container = ttk.Frame(self.paned, style="Workspace.TFrame", padding=(16, 0, 0, 0))
 
-        ttk.Label(left_panel, text="Titolo opzionale", style="Card.TLabel").grid(
+        self.paned.add(left_container, weight=2)
+        self.paned.add(center_container, weight=4)
+        self.paned.add(right_container, weight=2)
+
+        self._register_section("left", left_container, weight=2, collapse_symbol="◀", expand_symbol="▶")
+        self._register_section("center", center_container, weight=4, collapse_symbol="▾", expand_symbol="▴")
+        self._register_section("right", right_container, weight=2, collapse_symbol="▶", expand_symbol="◀")
+
+        # ---------------------------- left column (settings + queue)
+        left_container.columnconfigure(0, weight=1)
+        left_container.rowconfigure(0, weight=1)
+        left_body = ttk.Frame(left_container, style="Workspace.TFrame")
+        left_body.grid(row=0, column=0, sticky="nsew")
+        left_body.columnconfigure(0, weight=1)
+        left_body.rowconfigure(1, weight=1)
+
+        left_toggle = ttk.Button(
+            left_container,
+            text="◀",
+            width=2,
+            style="Ghost.TButton",
+            command=lambda: self._toggle_section("left"),
+        )
+        left_toggle.place(relx=1.0, rely=0.0, anchor="ne", x=-8, y=8)
+        self.sections["left"]["toggle"] = left_toggle
+
+        settings_card = ttk.Frame(left_body, style="Card.TFrame", padding=20)
+        settings_card.grid(row=0, column=0, sticky="nsew")
+        settings_card.columnconfigure(1, weight=1)
+
+        ttk.Label(settings_card, text="Parametri", style="Section.TLabel").grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 12)
+        )
+
+        ttk.Label(settings_card, text="Titolo opzionale", style="Card.TLabel").grid(
             row=1, column=0, sticky="w", pady=4
         )
         self.title_var = tk.StringVar(value=self.settings.rendering.title)
         title_entry = ttk.Entry(
-            left_panel, textvariable=self.title_var, width=32, style="Dark.TEntry"
+            settings_card, textvariable=self.title_var, width=32, style="Dark.TEntry"
         )
         title_entry.grid(row=1, column=1, sticky="ew", padx=(12, 0))
         self.title_var.trace_add("write", self._on_title_change)
 
-        ttk.Label(left_panel, text="Font TTF", style="Card.TLabel").grid(
+        ttk.Label(settings_card, text="Font TTF", style="Card.TLabel").grid(
             row=2, column=0, sticky="w", pady=4
         )
         self.font_var = tk.StringVar(
             value=self.settings.rendering.font_path or "Seleziona un font…"
         )
-        font_row = ttk.Frame(left_panel, style="Card.TFrame")
+        font_row = ttk.Frame(settings_card, style="Card.TFrame")
         font_row.grid(row=2, column=1, sticky="ew", padx=(12, 0))
         font_row.columnconfigure(0, weight=1)
         self.font_display = ttk.Label(
@@ -784,153 +824,227 @@ class WorkspaceFrame(ttk.Frame):
         )
         font_button.grid(row=0, column=1, padx=(12, 0))
 
-        ttk.Separator(left_panel, orient="horizontal").grid(
+        ttk.Separator(settings_card, orient="horizontal").grid(
             row=3, column=0, columnspan=2, sticky="ew", pady=(16, 12)
         )
 
-        ttk.Label(left_panel, text="Durata clip (s)", style="Card.TLabel").grid(
+        ttk.Label(settings_card, text="Durata clip (s)", style="Card.TLabel").grid(
             row=4, column=0, sticky="w"
         )
         self.clip_duration_var = tk.IntVar(
             value=self.settings.rendering.clip_duration
         )
         clip_duration_spin = self._spinbox(
-            left_panel, self.clip_duration_var, 30, 600, 10, 8
+            settings_card, self.clip_duration_var, 30, 600, 10, 8
         )
         clip_duration_spin.grid(row=4, column=1, sticky="w", padx=(12, 0), pady=4)
         self.clip_duration_var.trace_add("write", self._on_clip_duration_change)
 
-        ttk.Label(left_panel, text="Overlap (s)", style="Card.TLabel").grid(
+        ttk.Label(settings_card, text="Overlap (s)", style="Card.TLabel").grid(
             row=5, column=0, sticky="w"
         )
         self.overlap_var = tk.IntVar(value=self.settings.rendering.clip_overlap)
-        overlap_spin = self._spinbox(left_panel, self.overlap_var, 0, 30, 1, 6)
+        overlap_spin = self._spinbox(settings_card, self.overlap_var, 0, 30, 1, 6)
         overlap_spin.grid(row=5, column=1, sticky="w", padx=(12, 0), pady=4)
         self.overlap_var.trace_add("write", self._on_overlap_change)
 
-        ttk.Label(left_panel, text="Durata finale min (s)", style="Card.TLabel").grid(
+        ttk.Label(settings_card, text="Durata finale min (s)", style="Card.TLabel").grid(
             row=6, column=0, sticky="w"
         )
         self.final_min_var = tk.IntVar(value=self.settings.rendering.final_clip_min)
         final_min_spin = self._spinbox(
-            left_panel, self.final_min_var, 60, 360, 10, 8
+            settings_card, self.final_min_var, 60, 360, 10, 8
         )
         final_min_spin.grid(row=6, column=1, sticky="w", padx=(12, 0), pady=4)
         self.final_min_var.trace_add("write", self._on_final_min_change)
 
-        ttk.Label(left_panel, text="Durata finale max (s)", style="Card.TLabel").grid(
+        ttk.Label(settings_card, text="Durata finale max (s)", style="Card.TLabel").grid(
             row=7, column=0, sticky="w"
         )
         self.final_max_var = tk.IntVar(value=self.settings.rendering.final_clip_max)
         final_max_spin = self._spinbox(
-            left_panel, self.final_max_var, 90, 480, 10, 8
+            settings_card, self.final_max_var, 90, 480, 10, 8
         )
         final_max_spin.grid(row=7, column=1, sticky="w", padx=(12, 0), pady=4)
         self.final_max_var.trace_add("write", self._on_final_max_change)
 
-        ttk.Separator(left_panel, orient="horizontal").grid(
+        ttk.Separator(settings_card, orient="horizontal").grid(
             row=8, column=0, columnspan=2, sticky="ew", pady=(16, 12)
         )
 
-        ttk.Label(left_panel, text="Qualità (CRF)", style="Card.TLabel").grid(
+        ttk.Label(settings_card, text="Qualità (CRF)", style="Card.TLabel").grid(
             row=9, column=0, sticky="w"
         )
         self.crf_var = tk.IntVar(value=self.settings.rendering.crf)
-        crf_spin = self._spinbox(left_panel, self.crf_var, 10, 35, 1, 6)
+        crf_spin = self._spinbox(settings_card, self.crf_var, 10, 40, 1, 6)
         crf_spin.grid(row=9, column=1, sticky="w", padx=(12, 0), pady=4)
         self.crf_var.trace_add("write", self._on_crf_change)
 
-        ttk.Label(left_panel, text="Preset x264", style="Card.TLabel").grid(
+        ttk.Label(settings_card, text="Preset x264", style="Card.TLabel").grid(
             row=10, column=0, sticky="w"
         )
         self.preset_var = tk.StringVar(value=self.settings.rendering.x264_preset)
         preset_combo = ttk.Combobox(
-            left_panel,
+            settings_card,
             textvariable=self.preset_var,
-            values=[
-                "ultrafast",
-                "superfast",
-                "veryfast",
-                "faster",
-                "fast",
-                "medium",
-                "slow",
-                "slower",
-                "veryslow",
-            ],
-            width=12,
+            values=["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow"],
             state="readonly",
             style="Dark.TCombobox",
+            width=12,
         )
         preset_combo.grid(row=10, column=1, sticky="w", padx=(12, 0), pady=4)
         self.preset_var.trace_add("write", self._on_preset_change)
 
-        self.part_label_var = tk.BooleanVar(value=self.settings.rendering.show_part_label)
-        part_check = ttk.Checkbutton(
-            left_panel,
-            text="Mostra 'Parte N'",
-            variable=self.part_label_var,
-            command=self._on_part_toggle,
-            style="Card.TCheckbutton",
+        ttk.Separator(settings_card, orient="horizontal").grid(
+            row=11, column=0, columnspan=2, sticky="ew", pady=(16, 12)
         )
-        part_check.grid(row=11, column=0, columnspan=2, sticky="w", pady=(12, 4))
 
-        ttk.Label(left_panel, text="Prefisso parte", style="Card.TLabel").grid(
-            row=12, column=0, sticky="w"
+        self.part_label_var = tk.IntVar(value=1 if self.settings.rendering.show_part_label else 0)
+        part_toggle = ttk.Checkbutton(
+            settings_card,
+            text="Mostra dicitura Parte N",
+            variable=self.part_label_var,
+            style="Card.TCheckbutton",
+            command=self._on_part_toggle,
+        )
+        part_toggle.grid(row=12, column=0, columnspan=2, sticky="w", pady=4)
+
+        ttk.Label(settings_card, text="Prefisso", style="Card.TLabel").grid(
+            row=13, column=0, sticky="w"
         )
         self.part_prefix_var = tk.StringVar(
-            value=self.settings.publication.part_label_prefix
+            value=self.settings.publication.part_label_prefix or "Parte"
         )
-        part_prefix_entry = ttk.Entry(
-            left_panel, textvariable=self.part_prefix_var, width=15, style="Dark.TEntry"
-        )
-        part_prefix_entry.grid(row=12, column=1, sticky="w", padx=(12, 0), pady=4)
+        part_entry = ttk.Entry(settings_card, textvariable=self.part_prefix_var, style="Dark.TEntry")
+        part_entry.grid(row=13, column=1, sticky="ew", padx=(12, 0), pady=4)
         self.part_prefix_var.trace_add("write", self._on_part_prefix_change)
 
-        ttk.Separator(left_panel, orient="horizontal").grid(
-            row=13, column=0, columnspan=2, sticky="ew", pady=(16, 12)
+        ttk.Separator(settings_card, orient="horizontal").grid(
+            row=14, column=0, columnspan=2, sticky="ew", pady=(16, 12)
         )
 
-        ttk.Label(left_panel, text="Intervallo base (min)", style="Card.TLabel").grid(
-            row=14, column=0, sticky="w"
+        ttk.Label(settings_card, text="Intervallo parti (min)", style="Card.TLabel").grid(
+            row=15, column=0, sticky="w"
         )
         self.interval_var = tk.DoubleVar(
-            value=self.settings.publication.publish_interval.as_minutes()
+            value=self.settings.publication.publish_interval.minutes
         )
-        interval_spin = self._spinbox(left_panel, self.interval_var, 0, 180, 1, 8)
-        interval_spin.grid(row=14, column=1, sticky="w", padx=(12, 0), pady=4)
+        interval_spin = self._spinbox(settings_card, self.interval_var, 0, 240, 1, 8)
+        interval_spin.grid(row=15, column=1, sticky="w", padx=(12, 0), pady=4)
         self.interval_var.trace_add("write", self._on_interval_change)
 
         self.randomize = tk.BooleanVar(value=self.settings.publication.randomize_interval)
         self.random_button = ttk.Button(
-            left_panel,
+            settings_card,
             text=self._random_button_text(),
+            style="Accent.TButton" if self.randomize.get() else "Toggle.TButton",
             command=self._toggle_randomization,
-            style="Toggle.TButton",
-            width=22,
         )
-        self.random_button.grid(row=15, column=0, columnspan=2, sticky="ew", pady=(6, 4))
-        self._update_random_button_style()
+        self.random_button.grid(row=16, column=0, columnspan=2, sticky="ew", pady=(12, 4))
 
-        ttk.Label(left_panel, text="Random ± (s)", style="Card.TLabel").grid(
-            row=16, column=0, sticky="w"
+        ttk.Label(settings_card, text="Random ± (sec)", style="Card.TLabel").grid(
+            row=17, column=0, sticky="w"
         )
         self.random_range_var = tk.IntVar(
             value=self.settings.publication.randomization_range_seconds
         )
         random_range_spin = self._spinbox(
-            left_panel, self.random_range_var, 0, 600, 10, 8
+            settings_card, self.random_range_var, 0, 600, 10, 8
         )
-        random_range_spin.grid(row=16, column=1, sticky="w", padx=(12, 0), pady=4)
+        random_range_spin.grid(row=17, column=1, sticky="w", padx=(12, 0), pady=4)
         self.random_range_var.trace_add("write", self._on_random_range_change)
 
-        center_column = ttk.Frame(container, style="Workspace.TFrame")
-        center_column.grid(row=1, column=1, sticky="nsew", padx=24)
-        center_column.columnconfigure(0, weight=1)
-        center_column.rowconfigure(1, weight=1)
+        queue_card = ttk.Frame(left_body, style="Card.TFrame", padding=20)
+        queue_card.grid(row=1, column=0, sticky="nsew", pady=(16, 0))
+        queue_card.columnconfigure(0, weight=1)
+        queue_card.rowconfigure(2, weight=1)
 
-        layout_card = ttk.Frame(center_column, style="Card.TFrame", padding=20)
-        layout_card.grid(row=0, column=0, sticky="nsew")
+        ttk.Label(queue_card, text="Coda video", style="Section.TLabel").grid(
+            row=0, column=0, sticky="w"
+        )
+        ttk.Label(
+            queue_card,
+            text="I video in arrivo appaiono qui in ordine di pubblicazione",
+            style="SectionHint.TLabel",
+        ).grid(row=1, column=0, sticky="w", pady=(4, 12))
+
+        columns = ("number", "video", "status")
+        self.tree = ttk.Treeview(
+            queue_card,
+            columns=columns,
+            show="headings",
+            height=8,
+            style="Jobs.Treeview",
+        )
+        self.tree.heading("number", text="#", anchor="w")
+        self.tree.column("number", width=40, stretch=False, anchor="center")
+        self.tree.heading("video", text="Video", anchor="w")
+        self.tree.column("video", width=260, stretch=True, anchor="w")
+        self.tree.heading("status", text="Stato", anchor="w")
+        self.tree.column("status", width=160, stretch=False, anchor="w")
+        self.tree.grid(row=2, column=0, sticky="nsew")
+
+        queue_scroll = ttk.Scrollbar(
+            queue_card, orient="vertical", command=self.tree.yview, style="Vertical.TScrollbar"
+        )
+        queue_scroll.grid(row=2, column=1, sticky="ns", padx=(8, 0))
+        self.tree.configure(yscrollcommand=queue_scroll.set)
+
+        for stage, color in self.state_colors.items():
+            self.tree.tag_configure(f"state_{stage.name.lower()}", foreground=color)
+
+        # ----------------------------- center column (link bar + canvas)
+        center_container.columnconfigure(0, weight=1)
+        center_container.rowconfigure(0, weight=1)
+        center_body = ttk.Frame(center_container, style="Workspace.TFrame")
+        center_body.grid(row=0, column=0, sticky="nsew")
+        center_body.columnconfigure(0, weight=1)
+        center_body.rowconfigure(1, weight=1)
+
+        center_toggle = ttk.Button(
+            center_container,
+            text="▾",
+            width=2,
+            style="Ghost.TButton",
+            command=lambda: self._toggle_section("center"),
+        )
+        center_toggle.place(relx=1.0, rely=0.0, anchor="ne", x=-8, y=8)
+        self.sections["center"]["toggle"] = center_toggle
+
+        link_bar = ttk.Frame(center_body, style="Card.TFrame", padding=(20, 16))
+        link_bar.grid(row=0, column=0, sticky="ew")
+        link_bar.columnconfigure(0, weight=1)
+
+        self.link_entry_var = tk.StringVar()
+        self.link_entry = ttk.Entry(
+            link_bar, textvariable=self.link_entry_var, style="Dark.TEntry"
+        )
+        self.link_entry.grid(row=0, column=0, sticky="ew")
+        add_link_button = ttk.Button(
+            link_bar,
+            text="Aggiungi",
+            style="Accent.TButton",
+            command=self._process_link_entry,
+        )
+        add_link_button.grid(row=0, column=1, padx=(12, 0))
+        ttk.Label(
+            link_bar,
+            text="Incolla un link di YouTube per avviare subito il download",
+            style="SectionHint.TLabel",
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(12, 0))
+
+        self.link_placeholder_text = "Incolla un link di YouTube..."
+        self.link_placeholder_fg = "#64748b"
+        self.link_default_fg = "#f8fafc"
+        self.link_placeholder_active = False
+        self._set_link_placeholder()
+        self.link_entry.bind("<FocusIn>", self._on_link_focus_in)
+        self.link_entry.bind("<FocusOut>", self._on_link_focus_out)
+        self.link_entry.bind("<Return>", self._on_link_entry_return)
+        self.link_entry.bind("<<Paste>>", self._on_link_paste)
+
+        layout_card = ttk.Frame(center_body, style="Card.TFrame", padding=20)
+        layout_card.grid(row=1, column=0, sticky="nsew", pady=(16, 0))
         layout_card.columnconfigure(0, weight=1)
         layout_card.rowconfigure(2, weight=1)
 
@@ -975,88 +1089,26 @@ class WorkspaceFrame(ttk.Frame):
             layout_card, textvariable=self.layout_status_var, style="SectionHint.TLabel"
         ).grid(row=4, column=0, sticky="w", pady=(12, 0))
 
-        queue_card = ttk.Frame(center_column, style="Card.TFrame", padding=20)
-        queue_card.grid(row=1, column=0, sticky="nsew", pady=(24, 0))
-        queue_card.columnconfigure(0, weight=1)
-        queue_card.columnconfigure(1, weight=0)
-        queue_card.rowconfigure(4, weight=1)
+        # ------------------------------ right column (account + log)
+        right_container.columnconfigure(0, weight=1)
+        right_container.rowconfigure(0, weight=1)
+        right_body = ttk.Frame(right_container, style="Workspace.TFrame")
+        right_body.grid(row=0, column=0, sticky="nsew")
+        right_body.columnconfigure(0, weight=1)
+        right_body.rowconfigure(0, weight=1)
 
-        ttk.Label(queue_card, text="Coda clip", style="Section.TLabel").grid(
-            row=0, column=0, sticky="w"
+        right_toggle = ttk.Button(
+            right_container,
+            text="▶",
+            width=2,
+            style="Ghost.TButton",
+            command=lambda: self._toggle_section("right"),
         )
-        ttk.Label(
-            queue_card,
-            text=(
-                "Incolla uno o più link (uno per riga) e premi “Aggiungi alla coda”\n"
-                "Suggerimento: usa Ctrl+Invio per aggiungere subito"
-            ),
-            style="SectionHint.TLabel",
-            justify="left",
-        ).grid(row=1, column=0, sticky="w", pady=(4, 10))
+        right_toggle.place(relx=0.0, rely=0.0, anchor="nw", x=8, y=8)
+        self.sections["right"]["toggle"] = right_toggle
 
-        self.links_text = tk.Text(
-            queue_card,
-            height=4,
-            bg="#0f172a",
-            fg="#e2e8f0",
-            insertbackground="#e2e8f0",
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground="#1e293b",
-            highlightcolor="#38bdf8",
-            wrap="word",
-        )
-        self.links_text.grid(row=2, column=0, sticky="ew")
-        self.links_default_fg = "#e2e8f0"
-        self.links_placeholder_fg = "#64748b"
-        self.links_placeholder_text = "Incolla qui i link (uno per riga)"
-        self.links_placeholder_active = False
-        self.links_text.bind("<FocusIn>", self._on_links_focus_in)
-        self.links_text.bind("<FocusOut>", self._on_links_focus_out)
-        self.links_text.bind("<Control-Return>", self._on_links_submit)
-        self._show_links_placeholder()
-
-        add_button = ttk.Button(
-            queue_card,
-            text="Aggiungi alla coda",
-            style="Accent.TButton",
-            command=self._add_links,
-        )
-        add_button.grid(row=3, column=0, sticky="e", pady=(12, 0))
-
-        columns = ("id", "url", "status", "detail", "eta")
-        self.tree = ttk.Treeview(
-            queue_card,
-            columns=columns,
-            show="headings",
-            height=8,
-            style="Jobs.Treeview",
-        )
-        headings = {
-            "id": "ID",
-            "url": "Link",
-            "status": "Stato",
-            "detail": "Dettagli",
-            "eta": "Stima",
-        }
-        for column in columns:
-            self.tree.heading(column, text=headings[column], anchor="w")
-            self.tree.column(
-                column,
-                width=140 if column not in {"detail", "url"} else 220,
-                stretch=True,
-                anchor="w",
-            )
-        self.tree.grid(row=4, column=0, sticky="nsew", pady=(16, 0))
-
-        scrollbar = ttk.Scrollbar(
-            queue_card, orient="vertical", command=self.tree.yview, style="Vertical.TScrollbar"
-        )
-        scrollbar.grid(row=4, column=1, sticky="ns", pady=(16, 0), padx=(6, 0))
-        self.tree.configure(yscrollcommand=scrollbar.set)
-
-        right_panel = ttk.Frame(container, style="Card.TFrame", padding=20)
-        right_panel.grid(row=1, column=2, sticky="nsew")
+        right_panel = ttk.Frame(right_body, style="Card.TFrame", padding=20)
+        right_panel.grid(row=0, column=0, sticky="nsew")
         right_panel.columnconfigure(0, weight=1)
         right_panel.rowconfigure(6, weight=1)
 
@@ -1112,6 +1164,83 @@ class WorkspaceFrame(ttk.Frame):
         self.log_text.grid(row=6, column=0, sticky="nsew")
 
         self._register_shortcuts()
+
+    # ----------------------------------------------------------- section helpers
+    def _register_section(
+        self,
+        key: str,
+        frame: ttk.Frame,
+        *,
+        weight: int,
+        collapse_symbol: str,
+        expand_symbol: str,
+    ) -> None:
+        self.sections[key] = {
+            "frame": frame,
+            "weight": weight,
+            "collapse_symbol": collapse_symbol,
+            "expand_symbol": expand_symbol,
+            "collapsed": False,
+            "toggle": None,
+            "handle": None,
+            "handle_button": None,
+        }
+
+    def _toggle_section(self, key: str) -> None:
+        info = self.sections.get(key)
+        if not info:
+            return
+        if info["collapsed"]:
+            self._expand_section(key)
+        else:
+            self._collapse_section(key)
+
+    def _collapse_section(self, key: str) -> None:
+        info = self.sections.get(key)
+        if not info or info["collapsed"]:
+            return
+        frame = info["frame"]
+        panes = list(self.paned.panes())
+        name = str(frame)
+        if name not in panes:
+            return
+        index = panes.index(name)
+        self.paned.forget(frame)
+        handle = tk.Frame(self.paned, width=28, background="#0b1220")
+        button = ttk.Button(
+            handle,
+            text=info["expand_symbol"],
+            width=2,
+            style="Ghost.TButton",
+            command=lambda k=key: self._expand_section(k),
+        )
+        button.place(relx=0.5, rely=0.5, anchor="center")
+        self.paned.insert(index, handle)
+        info["collapsed"] = True
+        info["handle"] = handle
+        info["handle_button"] = button
+        toggle = info.get("toggle")
+        if toggle:
+            toggle.configure(text=info["expand_symbol"])
+
+    def _expand_section(self, key: str) -> None:
+        info = self.sections.get(key)
+        if not info or not info["collapsed"]:
+            return
+        handle = info.get("handle")
+        panes = list(self.paned.panes())
+        index = panes.index(str(handle)) if handle and str(handle) in panes else len(panes)
+        if handle and str(handle) in panes:
+            self.paned.forget(handle)
+            handle.destroy()
+        frame = info["frame"]
+        self.paned.insert(index, frame, weight=info["weight"])
+        info["handle"] = None
+        info["handle_button"] = None
+        info["collapsed"] = False
+        toggle = info.get("toggle")
+        if toggle:
+            toggle.configure(text=info["collapse_symbol"])
 
     # ---------------------------------------------------------------- callbacks
 
@@ -1283,46 +1412,54 @@ class WorkspaceFrame(ttk.Frame):
             self.settings.rendering.font_path = path
             self.font_var.set(path)
 
-    def _add_links(self) -> None:
-        self._auto_save_layout()
-        if self.links_placeholder_active:
-            raw = ""
-        else:
-            raw = self.links_text.get("1.0", tk.END).strip()
-        if not raw:
-            messagebox.showinfo("ClipperStudio", "Inserisci almeno un link.")
+    def _submit_links(self, links: List[str]) -> None:
+        if not links:
             return
-        links = [line.strip() for line in raw.splitlines() if line.strip()]
+        self._auto_save_layout()
         for link in links:
             self.controller.submit(link)
-        self.links_text.delete("1.0", tk.END)
-        self._show_links_placeholder()
 
-    def _on_links_submit(self, _: tk.Event) -> str:
+    def _on_link_entry_return(self, _: tk.Event) -> str:
         if not self._is_active_tab():
             return ""
-        self._add_links()
+        self._process_link_entry()
         return "break"
 
-    def _on_links_focus_in(self, _: tk.Event) -> None:
-        self.links_text.configure(highlightbackground="#38bdf8")
-        if self.links_placeholder_active:
-            self.links_text.delete("1.0", tk.END)
-            self.links_text.configure(fg=self.links_default_fg)
-            self.links_placeholder_active = False
+    def _on_link_focus_in(self, _: tk.Event) -> None:
+        if getattr(self, "link_placeholder_active", False):
+            try:
+                self.link_entry.configure(foreground=self.link_default_fg)
+            except tk.TclError:
+                pass
+            self.link_entry_var.set("")
+            self.link_placeholder_active = False
 
-    def _on_links_focus_out(self, _: tk.Event) -> None:
-        self.links_text.configure(highlightbackground="#1e293b")
-        content = self.links_text.get("1.0", tk.END).strip()
-        if not content:
-            self._show_links_placeholder()
+    def _on_link_focus_out(self, _: tk.Event) -> None:
+        if not self.link_entry_var.get().strip():
+            self._set_link_placeholder()
 
-    def _show_links_placeholder(self) -> None:
-        self.links_text.configure(state="normal")
-        self.links_text.delete("1.0", tk.END)
-        self.links_text.insert("1.0", self.links_placeholder_text)
-        self.links_text.configure(fg=self.links_placeholder_fg)
-        self.links_placeholder_active = True
+    def _on_link_paste(self, _: tk.Event) -> None:
+        self.after(80, self._process_link_entry)
+
+    def _process_link_entry(self) -> None:
+        if getattr(self, "link_placeholder_active", False):
+            return
+        raw = self.link_entry_var.get().strip()
+        if not raw:
+            return
+        links = [part.strip() for part in raw.replace("\r", "\n").splitlines() if part.strip()]
+        if not links:
+            return
+        self._submit_links(links)
+        self._set_link_placeholder()
+
+    def _set_link_placeholder(self) -> None:
+        self.link_placeholder_active = True
+        self.link_entry_var.set(self.link_placeholder_text)
+        try:
+            self.link_entry.configure(foreground=self.link_placeholder_fg)
+        except tk.TclError:
+            pass
 
     def _on_progress(self, job: VideoJob, stage: JobStage, message: str) -> None:
         self._ui_queue.put((job, stage, message))
@@ -1339,14 +1476,30 @@ class WorkspaceFrame(ttk.Frame):
 
     def _ensure_tree_item(self, job: VideoJob) -> str:
         item_id = job.identifier
+        if item_id not in self.queue_order:
+            self.queue_order.append(item_id)
         if not self.tree.exists(item_id):
             self.tree.insert(
                 "",
                 "end",
                 iid=item_id,
-                values=(job.identifier, job.url, job.status.label(), "", "—"),
+                values=("", self._queue_display(job), job.status.label()),
             )
         return item_id
+
+    def _queue_display(self, job: VideoJob) -> str:
+        text = job.url.strip()
+        if text.startswith("http://") or text.startswith("https://"):
+            text = text.split("//", 1)[-1]
+        text = text.rstrip("/")
+        if len(text) > 52:
+            text = f"{text[:49]}…"
+        return f"{text} · {job.identifier}"
+
+    def _refresh_queue_numbers(self) -> None:
+        for index, item_id in enumerate(self.queue_order, start=1):
+            if self.tree.exists(item_id):
+                self.tree.set(item_id, "number", str(index))
 
     def _update_job(self, job: VideoJob, stage: JobStage, message: str) -> None:
         if stage is JobStage.FAILED:
@@ -1354,12 +1507,11 @@ class WorkspaceFrame(ttk.Frame):
         else:
             job.update_status(stage)
         item_id = self._ensure_tree_item(job)
-        estimate = self.controller.estimate_completion(job)
-        eta_text = estimate or "—"
-        self.tree.item(
-            item_id,
-            values=(job.identifier, job.url, stage.label(), message, eta_text),
-        )
+        self.tree.set(item_id, "video", self._queue_display(job))
+        self.tree.set(item_id, "status", stage.label())
+        tag = f"state_{stage.name.lower()}"
+        self.tree.item(item_id, tags=(tag,))
+        self._refresh_queue_numbers()
         self._append_log(job, stage, message)
 
     def _append_log(self, job: VideoJob, stage: JobStage, message: str) -> None:
@@ -1510,6 +1662,7 @@ class ClipperStudioApp(tk.Tk):
         self.notebook.grid(row=0, column=0, sticky="nsew")
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
         self.notebook.bind("<Button-3>", self._on_tab_right_click)
+        self.notebook.bind("<Button-1>", self._handle_tab_click, add="+")
 
         add_button = ttk.Button(
             tabs_wrapper,
@@ -1547,10 +1700,36 @@ class ClipperStudioApp(tk.Tk):
             return tabs[index]
         return None
 
+    def _format_tab_text(self, title: str) -> str:
+        base = title.strip() or "Scheda"
+        return f"{base} ✕"
+
+    def _strip_tab_text(self, text: str) -> str:
+        return text.replace("✕", "").strip()
+
+    def _handle_tab_click(self, event: tk.Event) -> Optional[str]:
+        tab_id = self._tab_id_from_event(event)
+        if not tab_id:
+            return None
+        try:
+            index = self.notebook.index(tab_id)
+        except tk.TclError:
+            return None
+        bbox = self.notebook.bbox(index)
+        if not bbox:
+            return None
+        x, y, width, height = bbox
+        close_zone = 24
+        if event.x > x + width - close_zone:
+            self._context_tab = tab_id
+            self._close_selected_tab()
+            return "break"
+        return None
+
     def _create_workspace_tab(self, workspace_id: int, label: Optional[str] = None) -> None:
         frame = WorkspaceFrame(self.notebook, workspace_id, self.registry)
         text = label or f"Scheda {workspace_id}"
-        self.notebook.add(frame, text=text)
+        self.notebook.add(frame, text=self._format_tab_text(text))
         tab_id = self.notebook.tabs()[-1]
         self.workspace_tabs[tab_id] = workspace_id
         self.workspace_frames[workspace_id] = frame
@@ -1574,12 +1753,12 @@ class ClipperStudioApp(tk.Tk):
         tab_id = self._context_tab or self.notebook.select()
         if not tab_id:
             return
-        current_text = self.notebook.tab(tab_id, "text")
+        current_text = self._strip_tab_text(self.notebook.tab(tab_id, "text"))
         new_name = simpledialog.askstring(
             "Rinomina scheda", "Nuovo nome", parent=self, initialvalue=current_text
         )
         if new_name:
-            self.notebook.tab(tab_id, text=new_name.strip())
+            self.notebook.tab(tab_id, text=self._format_tab_text(new_name.strip()))
         self._context_tab = None
 
     def _duplicate_current_tab(self) -> None:
@@ -1607,6 +1786,7 @@ class ClipperStudioApp(tk.Tk):
         if workspace_id is not None:
             frame = self.workspace_frames.pop(workspace_id, None)
             if frame is not None:
+                frame._save_layout()
                 self.registry.remove(workspace_id)
                 frame.destroy()
         try:
