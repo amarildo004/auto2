@@ -41,6 +41,15 @@ class ClipTiming:
 
 
 @dataclass
+class SubtitleBundle:
+    """Container for subtitle artefacts generated during transcription."""
+
+    srt_path: Path
+    ass_path: Path
+    font_name: str
+
+
+@dataclass
 class VideoJob:
     """Represents a single video URL to process."""
 

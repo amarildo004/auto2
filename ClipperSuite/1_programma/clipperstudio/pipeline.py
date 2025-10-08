@@ -26,7 +26,7 @@ from .config import (
     load_workspace_layout,
     locate_dependency,
 )
-from .models import ClipTiming, JobStage, ProgressCallback, VideoJob
+from .models import ClipTiming, JobStage, ProgressCallback, SubtitleBundle, VideoJob
 from .utils import generate_clip_plan, randomise_interval
 
 
@@ -175,14 +175,55 @@ class ClipperPipeline:
             return f"{value} - text_w/2"
         return f"{value} - text_h/2"
 
+    def _escape_filter_path(self, path: Path) -> str:
+        value = path.resolve().as_posix()
+        value = value.replace("'", "\\'")
+        value = value.replace(":", "\\:")
+        return value
+
+    def _ass_alignment(self, anchor: str) -> int:
+        mapping = {
+            "topleft": 7,
+            "top": 8,
+            "topright": 9,
+            "left": 4,
+            "center": 5,
+            "right": 6,
+            "bottomleft": 1,
+            "bottom": 2,
+            "bottomright": 3,
+        }
+        return mapping.get(anchor.lower(), 5)
+
+    @staticmethod
+    def _format_ass_time(seconds: float) -> str:
+        total_cs = max(0, int(round(seconds * 100)))
+        centiseconds = total_cs % 100
+        total_seconds = total_cs // 100
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        secs = total_seconds % 60
+        return f"{hours:d}:{minutes:02d}:{secs:02d}.{centiseconds:02d}"
+
+    @staticmethod
+    def _sanitise_ass_text(text: str) -> str:
+        safe = text.replace("\\", "\\\\")
+        safe = safe.replace("{", "\\{").replace("}", "\\}")
+        safe = safe.replace("\n", "\\N")
+        return safe.strip()
+
     def render_clips(
-        self, video_file: Path, job: VideoJob, clip_plan: Iterable[ClipTiming]
+        self,
+        video_file: Path,
+        job: VideoJob,
+        clip_plan: Iterable[ClipTiming],
+        layout: Dict[str, Dict[str, object]],
+        subtitles: Optional[SubtitleBundle] = None,
     ) -> List[Path]:
         ffmpeg = self._resolve_executable("ffmpeg")
         output_files: List[Path] = []
         render_settings = self.settings.rendering
         job.clips_directory.mkdir(parents=True, exist_ok=True)
-        layout = load_workspace_layout(job.workspace_id)
         canvas_config = layout.get("canvas", {})
         canvas_width = int(canvas_config.get("width", DEFAULT_CANVAS_WIDTH))
         canvas_height = int(canvas_config.get("height", DEFAULT_CANVAS_HEIGHT))
@@ -217,6 +258,18 @@ class ClipperPipeline:
         overlay_x = clamp_overlay(overlay_x, canvas_width, target_width)
         overlay_y = clamp_overlay(overlay_y, canvas_height, target_height)
 
+        fontsdir_path: Optional[Path] = None
+        font_option = render_settings.font_path
+        if font_option:
+            try:
+                font_candidate = Path(font_option).expanduser()
+                if font_candidate.exists():
+                    fontsdir_path = font_candidate.parent
+            except OSError:
+                fontsdir_path = None
+
+        subtitle_available = bool(subtitles and subtitles.ass_path.exists())
+
         for clip in clip_plan:
             output_file = job.clips_directory / f"clip_{clip.index:03d}.mp4"
             filter_statements = [
@@ -244,6 +297,24 @@ class ClipperPipeline:
                 next_label = f"v_title_{clip.index}"
                 drawtext += f"[{next_label}]"
                 filter_statements.append(drawtext)
+                current_label = next_label
+            subtitle_layer = layers.get("subtitles", {})
+            if subtitle_available and subtitle_layer.get("visible", True):
+                subtitle_options = [
+                    f"filename='{self._escape_filter_path(subtitles.ass_path)}'",
+                ]
+                if fontsdir_path:
+                    subtitle_options.append(
+                        f"fontsdir='{self._escape_filter_path(fontsdir_path)}'"
+                    )
+                subtitle_options.append("charenc=UTF-8")
+                next_label = f"v_sub_{clip.index}"
+                subtitle_filter = (
+                    f"[{current_label}]subtitles="
+                    + ":".join(subtitle_options)
+                    + f"[{next_label}]"
+                )
+                filter_statements.append(subtitle_filter)
                 current_label = next_label
             if render_settings.show_part_label:
                 part_layer = layers.get("part_label", {})
@@ -340,7 +411,12 @@ class ClipperPipeline:
         return output_files
 
     # ------------------------------------------------------------- transcription
-    def transcribe(self, video_file: Path, job: VideoJob) -> Optional[Path]:
+    def transcribe(
+        self,
+        video_file: Path,
+        job: VideoJob,
+        layout: Dict[str, Dict[str, object]],
+    ) -> Optional[SubtitleBundle]:
         try:
             import whisper  # type: ignore
         except Exception as exc:  # pragma: no cover - optional dependency
@@ -354,14 +430,68 @@ class ClipperPipeline:
         model = whisper.load_model("small")
         result = model.transcribe(str(video_file))
         srt_path = job.clips_directory / f"{video_file.stem}.srt"
+        segments = result.get("segments", [])
         with open(srt_path, "w", encoding="utf-8") as handle:
-            for idx, segment in enumerate(result["segments"], start=1):
+            for idx, segment in enumerate(segments, start=1):
                 start = time.strftime(
                     "%H:%M:%S,%f", time.gmtime(segment["start"])
                 )[:-3]
                 end = time.strftime("%H:%M:%S,%f", time.gmtime(segment["end"]))[:-3]
                 handle.write(f"{idx}\n{start} --> {end}\n{segment['text'].strip()}\n\n")
-        return srt_path
+
+        canvas_config = layout.get("canvas", {})
+        layers = layout.get("layers", {})
+        subtitle_layer = layers.get("subtitles", {})
+        canvas_width = int(canvas_config.get("width", DEFAULT_CANVAS_WIDTH))
+        canvas_height = int(canvas_config.get("height", DEFAULT_CANVAS_HEIGHT))
+        pos_x = int(round(float(subtitle_layer.get("x", canvas_width / 2))))
+        pos_y = int(round(float(subtitle_layer.get("y", canvas_height - 160))))
+        anchor = str(subtitle_layer.get("anchor", "center"))
+        alignment = self._ass_alignment(anchor)
+
+        font_path = self.settings.rendering.font_path
+        if font_path:
+            try:
+                font_name_candidate = Path(font_path).stem or Path(font_path).name
+            except OSError:
+                font_name_candidate = "Subtitles"
+            font_name = font_name_candidate.strip() or "Subtitles"
+        else:
+            font_name = "Arial"
+        font_name = font_name.replace(",", " ").replace(";", " ")
+
+        ass_path = job.clips_directory / f"{video_file.stem}.ass"
+        ass_lines = [
+            "[Script Info]",
+            "ScriptType: v4.00+",
+            "WrapStyle: 2",
+            "ScaledBorderAndShadow: yes",
+            f"PlayResX: {canvas_width}",
+            f"PlayResY: {canvas_height}",
+            "",
+            "[V4+ Styles]",
+            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+            f"Style: Default,{font_name},52,&H00FFFFFF,&H000000FF,&H64000000,&H96000000,0,0,0,0,100,100,0,0,1,4,0,{alignment},24,24,24,0",
+            "",
+            "[Events]",
+            "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+        ]
+        for segment in segments:
+            start_cs = self._format_ass_time(float(segment["start"]))
+            end_cs = self._format_ass_time(float(segment["end"]))
+            text = self._sanitise_ass_text(segment.get("text", ""))
+            ass_lines.append(
+                "Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\an{align}\\pos({x},{y})}}{text}".format(
+                    start=start_cs,
+                    end=end_cs,
+                    align=alignment,
+                    x=pos_x,
+                    y=pos_y,
+                    text=text,
+                )
+            )
+        ass_path.write_text("\n".join(ass_lines) + "\n", encoding="utf-8")
+        return SubtitleBundle(srt_path=srt_path, ass_path=ass_path, font_name=font_name)
 
     # ------------------------------------------------------------- publication
     def publish_clips(self, clips: Iterable[Path], job: VideoJob) -> None:
@@ -415,7 +545,11 @@ class ClipperPipeline:
                 job.processing_directory.rmdir()
             except OSError:
                 pass
-        if job.clips_directory.exists() and job.status is JobStage.COMPLETED:
+        if (
+            self.settings.auto_delete_clips
+            and job.clips_directory.exists()
+            and job.status is JobStage.COMPLETED
+        ):
             for file in job.clips_directory.iterdir():
                 if file.is_file():
                     file.unlink()
@@ -423,8 +557,9 @@ class ClipperPipeline:
                 job.clips_directory.rmdir()
             except OSError:  # pragma: no cover - best effort cleanup
                 pass
-        # clips are deleted only after publication has succeeded, therefore we
-        # leave them on disk until the publish step returns without raising.
+        # When automatic deletion is enabled clips are removed only after
+        # publication succeeds; otherwise they remain available in the clips
+        # directory for manual reuse.
 
     # -------------------------------------------------------------------- main
     def process_job(self, job: VideoJob) -> None:
@@ -452,12 +587,18 @@ class ClipperPipeline:
             )
             for index, (start, end) in enumerate(clip_ranges)
         ]
-        self.logger.emit(job, JobStage.PROCESSING, "Rendering clip…")
-        clips = self.render_clips(video_file, job, job.clip_plan)
+        layout = load_workspace_layout(job.workspace_id)
+        job.clips_directory.mkdir(parents=True, exist_ok=True)
         self.logger.emit(job, JobStage.PROCESSING, "Trascrizione audio…")
-        subtitle_path = self.transcribe(video_file, job)
-        if subtitle_path:
-            self.logger.emit(job, JobStage.PROCESSING, f"Sottotitoli: {subtitle_path.name}")
+        subtitles = self.transcribe(video_file, job, layout)
+        if subtitles:
+            self.logger.emit(
+                job,
+                JobStage.PROCESSING,
+                f"Sottotitoli: {subtitles.srt_path.name}",
+            )
+        self.logger.emit(job, JobStage.PROCESSING, "Rendering clip…")
+        clips = self.render_clips(video_file, job, job.clip_plan, layout, subtitles)
         job.update_status(JobStage.PUBLISHING)
         self.logger.emit(job, JobStage.PUBLISHING, "Pubblicazione delle clip…")
         self.publish_clips(clips, job)

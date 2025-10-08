@@ -954,6 +954,21 @@ class WorkspaceFrame(ttk.Frame):
         random_range_spin.grid(row=17, column=1, sticky="w", padx=(12, 0), pady=4)
         self.random_range_var.trace_add("write", self._on_random_range_change)
 
+        self.auto_delete_var = tk.BooleanVar(value=self.settings.auto_delete_clips)
+        auto_delete_toggle = ttk.Checkbutton(
+            settings_card,
+            text="Elimina clip dopo la pubblicazione",
+            variable=self.auto_delete_var,
+            style="Card.TCheckbutton",
+            command=self._on_auto_delete_toggle,
+        )
+        auto_delete_toggle.grid(row=18, column=0, columnspan=2, sticky="w", pady=(12, 0))
+        ttk.Label(
+            settings_card,
+            text="Disattiva per conservare i file nella cartella clips del workspace",
+            style="SectionHint.TLabel",
+        ).grid(row=19, column=0, columnspan=2, sticky="w", pady=(4, 0))
+
         queue_card = ttk.Frame(left_body, style="Card.TFrame", padding=20)
         queue_card.grid(row=1, column=0, sticky="nsew", pady=(16, 0))
         queue_card.columnconfigure(0, weight=1)
@@ -1399,6 +1414,9 @@ class WorkspaceFrame(ttk.Frame):
             value = DEFAULT_RANDOMIZATION_RANGE_SECONDS
             self.random_range_var.set(value)
         self.settings.publication.randomization_range_seconds = value
+
+    def _on_auto_delete_toggle(self) -> None:
+        self.settings.auto_delete_clips = bool(self.auto_delete_var.get())
 
     def _on_token_change(self, *_: object) -> None:
         self.settings.publication.tiktok_access_token = self.token_var.get().strip()

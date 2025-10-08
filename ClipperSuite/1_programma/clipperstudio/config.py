@@ -210,6 +210,7 @@ class WorkspaceSettings:
 
     rendering: RenderingSettings = field(default_factory=RenderingSettings)
     publication: PublicationSettings = field(default_factory=PublicationSettings)
+    auto_delete_clips: bool = True
     download_directory: Path = field(
         default_factory=lambda: DEFAULT_WORKSPACE_ROOT / "downloads"
     )
