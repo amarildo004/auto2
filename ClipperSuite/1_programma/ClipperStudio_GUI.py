@@ -986,8 +986,12 @@ class WorkspaceFrame(ttk.Frame):
         )
         ttk.Label(
             queue_card,
-            text="Incolla uno o più link (uno per riga)",
+            text=(
+                "Incolla uno o più link (uno per riga) e premi “Aggiungi alla coda”\n"
+                "Suggerimento: usa Ctrl+Invio per aggiungere subito"
+            ),
             style="SectionHint.TLabel",
+            justify="left",
         ).grid(row=1, column=0, sticky="w", pady=(4, 10))
 
         self.links_text = tk.Text(
@@ -999,9 +1003,18 @@ class WorkspaceFrame(ttk.Frame):
             relief="flat",
             highlightthickness=1,
             highlightbackground="#1e293b",
+            highlightcolor="#38bdf8",
             wrap="word",
         )
         self.links_text.grid(row=2, column=0, sticky="ew")
+        self.links_default_fg = "#e2e8f0"
+        self.links_placeholder_fg = "#64748b"
+        self.links_placeholder_text = "Incolla qui i link (uno per riga)"
+        self.links_placeholder_active = False
+        self.links_text.bind("<FocusIn>", self._on_links_focus_in)
+        self.links_text.bind("<FocusOut>", self._on_links_focus_out)
+        self.links_text.bind("<Control-Return>", self._on_links_submit)
+        self._show_links_placeholder()
 
         add_button = ttk.Button(
             queue_card,
@@ -1272,7 +1285,10 @@ class WorkspaceFrame(ttk.Frame):
 
     def _add_links(self) -> None:
         self._auto_save_layout()
-        raw = self.links_text.get("1.0", tk.END).strip()
+        if self.links_placeholder_active:
+            raw = ""
+        else:
+            raw = self.links_text.get("1.0", tk.END).strip()
         if not raw:
             messagebox.showinfo("ClipperStudio", "Inserisci almeno un link.")
             return
@@ -1280,6 +1296,33 @@ class WorkspaceFrame(ttk.Frame):
         for link in links:
             self.controller.submit(link)
         self.links_text.delete("1.0", tk.END)
+        self._show_links_placeholder()
+
+    def _on_links_submit(self, _: tk.Event) -> str:
+        if not self._is_active_tab():
+            return ""
+        self._add_links()
+        return "break"
+
+    def _on_links_focus_in(self, _: tk.Event) -> None:
+        self.links_text.configure(highlightbackground="#38bdf8")
+        if self.links_placeholder_active:
+            self.links_text.delete("1.0", tk.END)
+            self.links_text.configure(fg=self.links_default_fg)
+            self.links_placeholder_active = False
+
+    def _on_links_focus_out(self, _: tk.Event) -> None:
+        self.links_text.configure(highlightbackground="#1e293b")
+        content = self.links_text.get("1.0", tk.END).strip()
+        if not content:
+            self._show_links_placeholder()
+
+    def _show_links_placeholder(self) -> None:
+        self.links_text.configure(state="normal")
+        self.links_text.delete("1.0", tk.END)
+        self.links_text.insert("1.0", self.links_placeholder_text)
+        self.links_text.configure(fg=self.links_placeholder_fg)
+        self.links_placeholder_active = True
 
     def _on_progress(self, job: VideoJob, stage: JobStage, message: str) -> None:
         self._ui_queue.put((job, stage, message))
