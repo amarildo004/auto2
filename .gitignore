@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+ClipperSuite/2_spaziatura/*
+!ClipperSuite/2_spaziatura/.gitkeep
+ClipperSuite/3_programmi_necessari/*
+!ClipperSuite/3_programmi_necessari/.gitkeep
