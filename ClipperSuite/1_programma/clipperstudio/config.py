@@ -154,6 +154,18 @@ class PublishInterval:
     def from_minutes(cls, minutes: float) -> "PublishInterval":
         return cls(int(max(0, minutes * 60)))
 
+    @property
+    def minutes(self) -> float:
+        """Return the interval expressed in minutes."""
+
+        return self.as_minutes()
+
+    @minutes.setter
+    def minutes(self, value: float) -> None:
+        """Update the interval keeping seconds and minutes in sync."""
+
+        self.seconds = int(max(0, value * 60))
+
     def as_minutes(self) -> float:
         return self.seconds / 60
 
